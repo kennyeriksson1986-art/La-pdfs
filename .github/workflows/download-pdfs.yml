@@ -2,9 +2,8 @@ name: Download LA PDFs
 
 on:
   schedule:
-    # Kör varje timme mellan 04:00-22:00 (dansk tid)
     - cron: '0 3-21 * * *'
-  workflow_dispatch:  # Tillåter manuell körning
+  workflow_dispatch:
 
 jobs:
   download:
@@ -20,7 +19,6 @@ jobs:
       - name: Get dates
         id: dates
         run: |
-          # Dansk/Svensk tidszon
           export TZ="Europe/Copenhagen"
           echo "today=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "tomorrow=$(date -d '+1 day' +%Y-%m-%d)" >> $GITHUB_OUTPUT
@@ -30,70 +28,82 @@ jobs:
           BASE_URL="https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La"
           TODAY="${{ steps.dates.outputs.today }}"
           TOMORROW="${{ steps.dates.outputs.tomorrow }}"
-          
-          # Routes att ladda ner
           ROUTES="10 11"
           
           for ROUTE in $ROUTES; do
             # Dagens PDF
-            FILENAME_TODAY="La-${ROUTE}-${TODAY}-${TODAY}.pdf"
-            echo "Downloading $FILENAME_TODAY..."
-            curl -f -o "pdfs/${FILENAME_TODAY}" "${BASE_URL}/${FILENAME_TODAY}" || echo "Not found: $FILENAME_TODAY"
+            FILENAME="La-${ROUTE}-${TODAY}-${TODAY}.pdf"
+            echo "Trying $FILENAME..."
+            if curl -f -s -o "pdfs/${FILENAME}" "${BASE_URL}/${FILENAME}"; then
+              echo "✓ Downloaded $FILENAME"
+            else
+              rm -f "pdfs/${FILENAME}"
+              echo "✗ Not available: $FILENAME"
+            fi
             
             # Morgondagens PDF
-            FILENAME_TOMORROW="La-${ROUTE}-${TOMORROW}-${TOMORROW}.pdf"
-            echo "Downloading $FILENAME_TOMORROW..."
-            curl -f -o "pdfs/${FILENAME_TOMORROW}" "${BASE_URL}/${FILENAME_TOMORROW}" || echo "Not found: $FILENAME_TOMORROW"
+            FILENAME="La-${ROUTE}-${TOMORROW}-${TOMORROW}.pdf"
+            echo "Trying $FILENAME..."
+            if curl -f -s -o "pdfs/${FILENAME}" "${BASE_URL}/${FILENAME}"; then
+              echo "✓ Downloaded $FILENAME"
+            else
+              rm -f "pdfs/${FILENAME}"
+              echo "✗ Not available: $FILENAME"
+            fi
             
-            # Kolla efter rettelser (R1-R10)
+            # Rettelser - endast om de faktiskt finns
             for R in $(seq 1 10); do
-              RETTELSE_TODAY="La-${ROUTE}-${TODAY}-${TODAY}-R${R}.pdf"
-              curl -f -o "pdfs/${RETTELSE_TODAY}" "${BASE_URL}/${RETTELSE_TODAY}" 2>/dev/null || true
+              FILENAME="La-${ROUTE}-${TODAY}-${TODAY}-R${R}.pdf"
+              if curl -f -s -o "pdfs/${FILENAME}" "${BASE_URL}/${FILENAME}" 2>/dev/null; then
+                # Kontrollera att filen inte är tom
+                if [ -s "pdfs/${FILENAME}" ]; then
+                  echo "✓ Downloaded rettelse: $FILENAME"
+                else
+                  rm -f "pdfs/${FILENAME}"
+                fi
+              else
+                rm -f "pdfs/${FILENAME}"
+              fi
               
-              RETTELSE_TOMORROW="La-${ROUTE}-${TOMORROW}-${TOMORROW}-R${R}.pdf"
-              curl -f -o "pdfs/${RETTELSE_TOMORROW}" "${BASE_URL}/${RETTELSE_TOMORROW}" 2>/dev/null || true
+              FILENAME="La-${ROUTE}-${TOMORROW}-${TOMORROW}-R${R}.pdf"
+              if curl -f -s -o "pdfs/${FILENAME}" "${BASE_URL}/${FILENAME}" 2>/dev/null; then
+                if [ -s "pdfs/${FILENAME}" ]; then
+                  echo "✓ Downloaded rettelse: $FILENAME"
+                else
+                  rm -f "pdfs/${FILENAME}"
+                fi
+              else
+                rm -f "pdfs/${FILENAME}"
+              fi
             done
           done
           
-          # Lista nedladdade filer
-          echo "Downloaded files:"
-          ls -la pdfs/
+          echo ""
+          echo "=== Downloaded files ==="
+          ls -la pdfs/ || echo "No files"
       
-      - name: Create index.json
+      - name: Create file list (only real PDFs)
         run: |
           cd pdfs
-          echo "[" > index.json
-          first=true
-          for f in *.pdf; do
-            if [ -f "$f" ]; then
-              if [ "$first" = true ]; then
-                first=false
-              else
-                echo "," >> index.json
-              fi
-              echo "  \"$f\"" >> index.json
-            fi
-          done
-          echo "]" >> index.json
+          # Lista endast filer som är större än 0 bytes och slutar med .pdf
+          find . -name "*.pdf" -size +0 -printf '%f\n' | sort | jq -R -s 'split("\n") | map(select(length > 0))' > index.json
+          echo "=== index.json ==="
           cat index.json
       
       - name: Upload to GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: pdfs/
-  
+
   deploy:
     needs: download
     runs-on: ubuntu-latest
-    
     permissions:
       pages: write
       id-token: write
-    
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
