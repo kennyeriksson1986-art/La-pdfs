@@ -24,31 +24,45 @@ jobs:
       - name: Create pdfs directory
         run: mkdir -p pdfs
 
-      - name: Get today's date
+      - name: Get dates
         id: date
-        run: echo "today=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+        run: |
+          echo "today=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "tomorrow=$(date -d '+1 day' +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
-      - name: Download LA Strækning 10 PDF
+      - name: Download LA Strækning 10 - Today
         run: |
           curl -L -f -o "pdfs/La-10-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-10-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}.pdf" || echo "Not available"
 
-      - name: Download LA Strækning 11 PDF
+      - name: Download LA Strækning 11 - Today
         run: |
           curl -L -f -o "pdfs/La-11-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-11-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}.pdf" || echo "Not available"
 
-      - name: Download Rettelser for Strækning 10
+      - name: Download LA Strækning 10 - Tomorrow
         run: |
-          for r in 1 2 3 4 5; do
-            curl -L -f -o "pdfs/La-10-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}-R${r}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-10-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}-R${r}.pdf" 2>/dev/null || true
+          curl -L -f -o "pdfs/La-10-${{ steps.date.outputs.tomorrow }}-${{ steps.date.outputs.tomorrow }}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-10-${{ steps.date.outputs.tomorrow }}-${{ steps.date.outputs.tomorrow }}.pdf" || echo "Not available"
+
+      - name: Download LA Strækning 11 - Tomorrow
+        run: |
+          curl -L -f -o "pdfs/La-11-${{ steps.date.outputs.tomorrow }}-${{ steps.date.outputs.tomorrow }}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-11-${{ steps.date.outputs.tomorrow }}-${{ steps.date.outputs.tomorrow }}.pdf" || echo "Not available"
+
+      - name: Download Rettelser - Today
+        run: |
+          for route in 10 11; do
+            for r in 1 2 3 4 5; do
+              curl -L -f -o "pdfs/La-${route}-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}-R${r}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-${route}-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}-R${r}.pdf" 2>/dev/null || true
+            done
           done
 
-      - name: Download Rettelser for Strækning 11
+      - name: Download Rettelser - Tomorrow
         run: |
-          for r in 1 2 3 4 5; do
-            curl -L -f -o "pdfs/La-11-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}-R${r}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-11-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}-R${r}.pdf" 2>/dev/null || true
+          for route in 10 11; do
+            for r in 1 2 3 4 5; do
+              curl -L -f -o "pdfs/La-${route}-${{ steps.date.outputs.tomorrow }}-${{ steps.date.outputs.tomorrow }}-R${r}.pdf" "https://www.bane.dk/temp/FileFetch/RouteInformationFolder/La/La-${route}-${{ steps.date.outputs.tomorrow }}-${{ steps.date.outputs.tomorrow }}-R${r}.pdf" 2>/dev/null || true
+            done
           done
 
-      - name: Remove empty/failed downloads
+      - name: Remove empty downloads
         run: |
           find pdfs -name "*.pdf" -size 0 -delete 2>/dev/null || true
           find pdfs -name "*.pdf" -size -1k -delete 2>/dev/null || true
