@@ -24,19 +24,30 @@ jobs:
       - name: Create pdfs directory
         run: mkdir -p pdfs
 
-      - name: Download LA Vest PDF
-        run: |
-          curl -L -o pdfs/la-vest.pdf "https://www.LegacyURL/arbejdspapir.aspx?LegacyJobID=123" || echo "Failed to download LA Vest"
+      - name: Get today's date
+        id: date
+        run: echo "today=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
-      - name: Download LA Øst PDF
+      - name: Download LA Strækning 10 PDF
         run: |
-          curl -L -o pdfs/la-ost.pdf "https://www.LegacyURL/arbejdspapir.aspx?LegacyJobID=456" || echo "Failed to download LA Øst"
+          curl -L -o "pdfs/La-10-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}.pdf" "https://www.LegacyURL/arbejdspapir.aspx?LegacyJobID=123" || echo "Failed to download LA 10"
+
+      - name: Download LA Strækning 11 PDF
+        run: |
+          curl -L -o "pdfs/La-11-${{ steps.date.outputs.today }}-${{ steps.date.outputs.today }}.pdf" "https://www.LegacyURL/arbejdspapir.aspx?LegacyJobID=456" || echo "Failed to download LA 11"
 
       - name: Copy app files
         run: |
           cp index.html pdfs/
           cp sw.js pdfs/
           cp icon.png pdfs/ || true
+
+      - name: Generate index.json
+        run: |
+          cd pdfs
+          ls -1 *.pdf 2>/dev/null | jq -R -s -c 'split("\n") | map(select(length > 0))' > index.json
+          echo "Generated index.json:"
+          cat index.json
 
       - name: List downloaded files
         run: ls -la pdfs/
