@@ -1771,7 +1771,7 @@
         const savedTrainsContainer = document.getElementById('savedTrainsContainer');
         const savedTrainsList = document.getElementById('savedTrainsList');
 
-        // Saved trains (max 10)
+        // Saved trains (max 10) - stores objects with trainNum, variantIndex, and route
         let savedTrains = [];
 
         function loadSavedTrains() {
@@ -1786,19 +1786,24 @@
             }
 
             savedTrainsContainer.classList.remove('hidden');
-            savedTrainsList.innerHTML = savedTrains.map((train, idx) => `
-                <div class="saved-train-chip" onclick="searchSavedTrain('${train}')">
-                    <span>🚂 ${train}</span>
+            savedTrainsList.innerHTML = savedTrains.map((train, idx) => {
+                const displayRoute = train.route ? ` (${train.route.substring(0, 15)}${train.route.length > 15 ? '...' : ''})` : '';
+                return `
+                <div class="saved-train-chip" onclick="searchSavedTrain('${train.trainNum}', ${train.variantIndex})">
+                    <span>🚂 ${train.trainNum}${displayRoute}</span>
                     <span class="remove-train" onclick="removeSavedTrain(${idx}, event)" title="Ta bort">✕</span>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
-        function saveTrain(trainNum) {
+        function saveTrain(trainNum, variantIndex, route) {
             if (!trainNum) return;
 
-            // Check if already saved
-            if (savedTrains.includes(trainNum)) {
+            // Create unique key for this variant
+            const key = `${trainNum}-${variantIndex}`;
+
+            // Check if already saved (same train + variant)
+            if (savedTrains.some(t => `${t.trainNum}-${t.variantIndex}` === key)) {
                 return;
             }
 
@@ -1808,7 +1813,7 @@
                 savedTrains.shift();
             }
 
-            savedTrains.push(trainNum);
+            savedTrains.push({ trainNum, variantIndex, route });
             renderSavedTrains();
             // Re-render variants to update button states
             if (currentVariants.length > 0) {
@@ -1816,20 +1821,32 @@
             }
         }
 
+        function isTrainVariantSaved(trainNum, variantIndex) {
+            return savedTrains.some(t => t.trainNum === trainNum && t.variantIndex === variantIndex);
+        }
+
         function removeSavedTrain(index, event) {
             event.stopPropagation(); // Prevent triggering search
             savedTrains.splice(index, 1);
             renderSavedTrains();
+            // Re-render variants to update button states
+            if (currentVariants.length > 0) {
+                showVariantSelector(currentVariants, currentTrainQuery);
+            }
         }
 
         function clearSavedTrains() {
             savedTrains = [];
             renderSavedTrains();
+            // Re-render variants to update button states
+            if (currentVariants.length > 0) {
+                showVariantSelector(currentVariants, currentTrainQuery);
+            }
         }
 
-        function searchSavedTrain(trainNum) {
+        function searchSavedTrain(trainNum, variantIndex) {
             searchInput.value = trainNum;
-            searchForTrain(trainNum, true); // true = auto-open first variant
+            searchForTrain(trainNum, true, variantIndex); // pass specific variant to open
         }
 
         async function loadTrainPDF() {
@@ -1894,7 +1911,7 @@
             }
         });
 
-        function searchForTrain(query, autoOpen = false) {
+        function searchForTrain(query, autoOpen = false, specificVariant = 0) {
             // Close any open timetable
             closeTimetableOverlay();
             activeVariantIndex = -1;
@@ -1913,11 +1930,15 @@
                     variantSelector.innerHTML = '<div class="no-results">🔍 Ingen køreplan fundet</div>';
                 } else {
                     showVariantSelector(variants, query);
-                    // Auto-open first variant if requested (e.g., from saved trains)
+                    // Auto-open specific variant if requested (e.g., from saved trains)
                     if (autoOpen && variants.length > 0) {
-                        activeVariantIndex = 0;
-                        variantSelector.querySelector('.variant-option').classList.add('active');
-                        openTimetableOverlay(variants[0], query);
+                        const variantToOpen = Math.min(specificVariant, variants.length - 1);
+                        activeVariantIndex = variantToOpen;
+                        const variantOptions = variantSelector.querySelectorAll('.variant-option');
+                        if (variantOptions[variantToOpen]) {
+                            variantOptions[variantToOpen].classList.add('active');
+                        }
+                        openTimetableOverlay(variants[variantToOpen], query);
                     }
                 }
             }, 100);
@@ -2147,7 +2168,7 @@
             variants.forEach((v, i) => {
                 const routeDisplay = v.route || `${v.firstStation} → ${v.lastStation}`;
                 const isActive = activeVariantIndex === i;
-                const isSaved = savedTrains.includes(query);
+                const isSaved = isTrainVariantSaved(query, i);
                 html += `
                     <div class="variant-option ${isActive ? 'active' : ''}" data-index="${i}">
                         <div class="variant-left">
@@ -2159,7 +2180,7 @@
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;">
                             <div class="variant-stops">${v.stopCount} stop →</div>
-                            <button class="save-train-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); saveTrain('${query}')" title="${isSaved ? 'Redan sparad' : 'Spara tågnummer'}" ${isSaved ? 'disabled' : ''}>
+                            <button class="save-train-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); saveTrain('${query}', ${i}, '${routeDisplay.replace(/'/g, "\\'")}')" title="${isSaved ? 'Redan sparad' : 'Spara tågnummer'}" ${isSaved ? 'disabled' : ''}>
                                 ${isSaved ? '✓' : '+'}
                             </button>
                         </div>
