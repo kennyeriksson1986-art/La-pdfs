@@ -70,7 +70,7 @@ jobs:
         with:
           path: pdfs/
 
-  deploy:
+deploy:
     needs: download
     runs-on: ubuntu-latest
     permissions:
@@ -83,4 +83,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        - name: Copy app files
