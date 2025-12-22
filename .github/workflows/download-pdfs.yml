@@ -2,7 +2,7 @@ name: Download PDFs and Deploy
 
 on:
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 1-22 * * *'
   workflow_dispatch:
 
 permissions:
