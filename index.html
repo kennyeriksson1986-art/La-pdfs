@@ -1504,7 +1504,7 @@
             <input type="password" id="passwordInput" class="password-input" placeholder="Lösenord" autofocus>
             <button class="password-btn" onclick="checkPassword()">Öppna</button>
             <div class="password-error hidden" id="passwordError">Fel lösenord</div>
-            <span class="login-version">v0.06</span>
+            <span class="login-version">v0.08</span>
         </div>
     </div>
 
@@ -1519,7 +1519,7 @@
             <button class="refresh-btn" onclick="refreshLaDisplay()" title="Uppdatera">
                 <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
             </button>
-            <span class="version-label">v0.06</span>
+            <span class="version-label">v0.08</span>
         </div>
     </div>
 
@@ -1739,7 +1739,7 @@
 
         // IndexedDB for reliable offline storage
         const DB_NAME = 'dkapp-offline';
-        const DB_VERSION = 1;
+        const DB_VERSION = 2;
         let db = null;
 
         async function initDB() {
@@ -1766,6 +1766,9 @@
                         }
                         if (!database.objectStoreNames.contains('meta')) {
                             database.createObjectStore('meta', { keyPath: 'key' });
+                        }
+                        if (!database.objectStoreNames.contains('savedTrains')) {
+                            database.createObjectStore('savedTrains', { keyPath: 'id' });
                         }
                     };
                 } catch (e) {
@@ -1821,7 +1824,25 @@
                     resolve([]);
                 }
             });
-        } // Track currently viewed train number
+        }
+
+        async function deleteFromIDB(storeName, key) {
+            if (!db) await initDB();
+            if (!db) return;
+            return new Promise((resolve) => {
+                try {
+                    const tx = db.transaction(storeName, 'readwrite');
+                    const store = tx.objectStore(storeName);
+                    store.delete(key);
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => resolve();
+                } catch (e) {
+                    resolve();
+                }
+            });
+        }
+
+        // Track currently viewed train number
         let activeKbhDeparture = null; // Track departure time from København H
         let activeOsterportDeparture = null; // Track departure time from Østerport
         let laReminderShown = false; // Track if reminder has been shown
@@ -2451,7 +2472,7 @@
             `}).join('');
         }
 
-        function saveTrain(trainNum, variantIndex, route, departureTime) {
+        async function saveTrain(trainNum, variantIndex, route, departureTime, variantData) {
             if (!trainNum) return;
 
             // Create unique key for this variant
@@ -2464,12 +2485,26 @@
 
             // Check max limit
             if (savedTrains.length >= 10) {
-                // Remove oldest
-                savedTrains.shift();
+                // Remove oldest and its cached data
+                const removed = savedTrains.shift();
+                if (removed) {
+                    await deleteFromIDB('savedTrains', `${removed.trainNum}-${removed.variantIndex}`);
+                }
             }
 
             savedTrains.push({ trainNum, variantIndex, route, departureTime: departureTime || '' });
             setSavedTrainsCookie();
+
+            // Save full variant data to IndexedDB for offline access
+            if (variantData) {
+                await saveToIDB('savedTrains', {
+                    id: key,
+                    trainNum,
+                    variantIndex,
+                    variant: variantData
+                });
+            }
+
             renderSavedTrains();
             // Re-render variants to update button states
             if (currentVariants.length > 0) {
@@ -2481,8 +2516,12 @@
             return savedTrains.some(t => t.trainNum === trainNum && t.variantIndex === variantIndex);
         }
 
-        function removeSavedTrain(index, event) {
+        async function removeSavedTrain(index, event) {
             event.stopPropagation(); // Prevent triggering search
+            const train = savedTrains[index];
+            if (train) {
+                await deleteFromIDB('savedTrains', `${train.trainNum}-${train.variantIndex}`);
+            }
             savedTrains.splice(index, 1);
             setSavedTrainsCookie();
             renderSavedTrains();
@@ -2492,7 +2531,11 @@
             }
         }
 
-        function clearSavedTrains() {
+        async function clearSavedTrains() {
+            // Delete all cached train data
+            for (const train of savedTrains) {
+                await deleteFromIDB('savedTrains', `${train.trainNum}-${train.variantIndex}`);
+            }
             savedTrains = [];
             setSavedTrainsCookie();
             renderSavedTrains();
@@ -2502,9 +2545,25 @@
             }
         }
 
-        function searchSavedTrain(trainNum, variantIndex) {
+        async function searchSavedTrain(trainNum, variantIndex) {
             searchInput.value = trainNum;
-            searchForTrain(trainNum, true, variantIndex); // pass specific variant to open
+
+            // Try to load cached variant data first
+            const key = `${trainNum}-${variantIndex}`;
+            const cached = await getFromIDB('savedTrains', key);
+
+            if (cached && cached.variant) {
+                // Show cached data immediately
+                currentVariants = [cached.variant];
+                currentTrainQuery = trainNum;
+                activeVariantIndex = 0;
+                showVariantSelector(currentVariants, trainNum);
+                openTimetableOverlay(cached.variant, trainNum);
+                resultsCard.classList.remove('hidden');
+            } else {
+                // Fall back to searching
+                searchForTrain(trainNum, true, variantIndex);
+            }
         }
 
         async function loadTrainPDF() {
@@ -2829,7 +2888,7 @@
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;">
                             <div class="variant-stops">${v.stopCount} stop →</div>
-                            <button class="save-train-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); saveTrain('${query}', ${i}, '${routeDisplay.replace(/'/g, "\\'")}', '${v.firstTime || ''}')" title="${isSaved ? 'Redan sparad' : 'Spara tågnummer'}" ${isSaved ? 'disabled' : ''}>
+                            <button class="save-train-btn ${isSaved ? 'saved' : ''}" data-save-index="${i}" title="${isSaved ? 'Redan sparad' : 'Spara tågnummer'}" ${isSaved ? 'disabled' : ''}>
                                 ${isSaved ? '✓' : '+'}
                             </button>
                         </div>
@@ -2838,6 +2897,21 @@
 
             html += '</div>';
             variantSelector.innerHTML = html;
+
+            // Add click handlers for save buttons
+            variantSelector.querySelectorAll('.save-train-btn[data-save-index]').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const idx = parseInt(btn.dataset.saveIndex);
+                    const v = variants[idx];
+                    const routeDisplay = v.route || `${v.firstStation} → ${v.lastStation}`;
+                    await saveTrain(query, idx, routeDisplay, v.firstTime || '', v);
+                    // Update button state
+                    btn.classList.add('saved');
+                    btn.innerHTML = '✓';
+                    btn.disabled = true;
+                });
+            });
 
             variantSelector.querySelectorAll('.variant-option').forEach(opt => {
                 opt.addEventListener('click', () => {
@@ -3140,7 +3214,62 @@
         // INIT
         // ========================================
 
-        function initApp() {
+        async function cleanupOldFiles() {
+            // Remove cached LA files older than 2 days
+            const twoDaysAgo = new Date();
+            twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+            twoDaysAgo.setHours(0, 0, 0, 0);
+
+            let removedCount = 0;
+
+            // Clean from IndexedDB
+            const files = await getAllFromIDB('files');
+            for (const file of files) {
+                // Extract date from filename: La-10-2024-12-20-...
+                const match = file.name.match(/La-\d+-(\d{4}-\d{2}-\d{2})/);
+                if (match) {
+                    const fileDate = new Date(match[1]);
+                    if (fileDate < twoDaysAgo) {
+                        await deleteFromIDB('files', file.name);
+                        cachedFiles.delete(file.name);
+                        removedCount++;
+                    }
+                }
+            }
+
+            // Clean from Cache API
+            if ('caches' in window) {
+                try {
+                    const cache = await caches.open('dkapp-pdfs');
+                    const keys = await cache.keys();
+                    for (const request of keys) {
+                        const url = request.url;
+                        const match = url.match(/La-\d+-(\d{4}-\d{2}-\d{2})/);
+                        if (match) {
+                            const fileDate = new Date(match[1]);
+                            if (fileDate < twoDaysAgo) {
+                                await cache.delete(request);
+                                removedCount++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log('Cache cleanup error:', e);
+                }
+            }
+
+            if (removedCount > 0) {
+                console.log(`Rensade ${removedCount} gamla filer`);
+            }
+        }
+
+        async function initApp() {
+            // Initialize IndexedDB first for offline support
+            await initDB();
+
+            // Clean up old cached files (older than 2 days)
+            await cleanupOldFiles();
+
             updateClock();
             setInterval(updateClock, 1000);
             // Update saved trains highlighting every minute
