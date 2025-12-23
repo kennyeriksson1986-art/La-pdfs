@@ -1504,7 +1504,7 @@
             <input type="password" id="passwordInput" class="password-input" placeholder="Lösenord" autofocus>
             <button class="password-btn" onclick="checkPassword()">Öppna</button>
             <div class="password-error hidden" id="passwordError">Fel lösenord</div>
-            <span class="login-version">v0.08</span>
+            <span class="login-version">v0.09</span>
         </div>
     </div>
 
@@ -1519,7 +1519,7 @@
             <button class="refresh-btn" onclick="refreshLaDisplay()" title="Uppdatera">
                 <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
             </button>
-            <span class="version-label">v0.08</span>
+            <span class="version-label">v0.09</span>
         </div>
     </div>
 
@@ -1848,6 +1848,50 @@
         let laReminderShown = false; // Track if reminder has been shown
         let laReminderInterval = null; // Interval for checking time
         let countdownInterval = null; // Interval for countdown timer
+
+        // Save/restore open view state
+        async function saveViewState() {
+            const state = {
+                key: 'viewState',
+                pdf: currentPdfUrl ? { url: currentPdfUrl, fileName: currentPdfFileName } : null,
+                train: activeTrainNumber ? {
+                    trainNum: String(activeTrainNumber),
+                    variantIndex: activeVariantIndex,
+                    variant: currentVariants[activeVariantIndex] || null
+                } : null
+            };
+            await saveToIDB('meta', state);
+        }
+
+        async function restoreViewState() {
+            const state = await getFromIDB('meta', 'viewState');
+            if (!state) return;
+
+            // Restore PDF overlay
+            if (state.pdf && state.pdf.url) {
+                // Small delay to let the app initialize
+                setTimeout(() => {
+                    openPdfOverlay(state.pdf.url, state.pdf.fileName);
+                }, 300);
+            }
+
+            // Restore timetable overlay
+            if (state.train && state.train.variant) {
+                setTimeout(() => {
+                    currentVariants = [state.train.variant];
+                    currentTrainQuery = state.train.trainNum;
+                    activeVariantIndex = 0;
+                    searchInput.value = state.train.trainNum;
+                    showVariantSelector(currentVariants, state.train.trainNum);
+                    openTimetableOverlay(state.train.variant, state.train.trainNum);
+                    resultsCard.classList.remove('hidden');
+                }, 100);
+            }
+        }
+
+        async function clearViewState() {
+            await saveToIDB('meta', { key: 'viewState', pdf: null, train: null });
+        }
 
         async function fetchWithTimeout(url, timeout = 3000) {
             const controller = new AbortController();
@@ -2287,6 +2331,9 @@
             content.innerHTML = '<div class="pdf-loading"><div class="spinner"></div><span>Laddar PDF...</span></div>';
             overlay.classList.add('active');
 
+            // Save view state for restoration on app restart
+            saveViewState();
+
             try {
                 let pdfData = url;
 
@@ -2370,6 +2417,8 @@
             document.getElementById('pdfContent').style.filter = 'brightness(1)';
             // Reset expand icon
             document.getElementById('pdfExpandIcon').innerHTML = '<path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm.5-7H9v2H7v1h2v2h1v-2h2V9h-2z"/>';
+            // Update saved view state
+            saveViewState();
         }
 
         function adjustBrightness(value) {
@@ -2937,6 +2986,9 @@
             activeTrainNumber = parseInt(query) || null; // Store the train number
             laReminderShown = false; // Reset reminder flag
 
+            // Save view state for restoration on app restart
+            setTimeout(() => saveViewState(), 100);
+
             // Find departure time from København H
             activeKbhDeparture = null;
             const kbhStop = variant.stops.find(s =>
@@ -3014,6 +3066,8 @@
             stopCountdown();
             // Remove active state from variants
             variantSelector.querySelectorAll('.variant-option').forEach(o => o.classList.remove('active'));
+            // Update saved view state
+            saveViewState();
         }
 
         function startLaReminderCheck() {
@@ -3277,6 +3331,9 @@
             refreshLaDisplay();
             loadTrainPDF();
             loadSavedTrains();
+
+            // Restore any open views from previous session
+            restoreViewState();
 
             // Listen for online/offline changes
             window.addEventListener('online', () => {
